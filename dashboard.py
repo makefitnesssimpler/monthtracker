@@ -166,8 +166,9 @@ body{
 
 .dashboard-card{
     background:white;
-    border-radius:28px;
-    box-shadow:0 10px 30px rgba(0,0,0,0.08);
+    border-radius:20px;
+    box-shadow:0 8px 24px rgba(15,23,42,0.08);
+    border:1px solid #e5e7eb;
 }
 
 table{
@@ -176,7 +177,7 @@ table{
 }
 
 th,td{
-    border:1px solid #d8dee8;
+    border:1px solid #e5e7eb;
 }
 
 thead th{
@@ -186,7 +187,7 @@ thead th{
 }
 
 tbody tr:hover{
-    background:#f5f9ff;
+    background:#f8fbff;
 }
 
 .filter{
@@ -200,9 +201,9 @@ tbody tr:hover{
 }
 
 .summary-title{
-    font-size:28px;
+    font-size:24px;
     font-weight:800;
-    padding:18px 24px;
+    padding:14px 20px;
     color:white;
 }
 
@@ -465,18 +466,29 @@ c.toLowerCase().includes('as name')
 // CALCULATE SUBTOTALS
 // =======================================================
 
+function findMatchingColumn(columns, keywords){
+return columns.find(col=>{
+const name=String(col).toLowerCase();
+return keywords.every(k=>name.includes(k));
+});
+}
+
+function readCellNumber(cellValue){
+const parsed = parseFloat(String(cellValue ?? '').replace(/,/g,'').trim());
+return isNaN(parsed) ? 0 : parsed;
+}
+
 function calculateSubtotals(sectionId){
 
 const section=document.getElementById(sectionId);
 
-const totalBox=section.querySelector('.subtotal-total');
-
 const recordBox=section.querySelector('.subtotal-records');
+const subtotalBoxes = section.querySelectorAll('[data-subtotal-column]');
 
 const rows=section.querySelectorAll('tbody tr');
 
-let total=0;
 let records=0;
+const totals={};
 
 rows.forEach(row=>{
 
@@ -485,27 +497,25 @@ const cells=row.querySelectorAll('td');
 if(cells.length>0){
 
 records++;
-
-cells.forEach(cell=>{
-
-const value=parseInt(
-String(cell.innerText).replace(/,/g,'')
-);
-
-if(!isNaN(value))
-total += value;
-
+subtotalBoxes.forEach(box=>{
+const col=box.dataset.subtotalColumn;
+const idx=Number(box.dataset.columnIndex);
+if(idx>=0 && cells[idx]){
+totals[col]=(totals[col] || 0) + readCellNumber(cells[idx].innerText);
+}
 });
 
 }
 
 });
 
-if(totalBox)
-totalBox.innerText=total.toLocaleString();
-
 if(recordBox)
 recordBox.innerText=records;
+
+subtotalBoxes.forEach(box=>{
+const col=box.dataset.subtotalColumn;
+box.innerText=(totals[col] || 0).toLocaleString();
+});
 
 }
 
@@ -531,8 +541,38 @@ return;
 }
 
 const columns=Object.keys(data[0]);
+const subtotalColumnsConfig = {
+    pwg: [
+        findMatchingColumn(columns,['may','base']),
+        findMatchingColumn(columns,['may','plan']),
+        findMatchingColumn(columns,['may','ach']),
+        findMatchingColumn(columns,['may','balance'])
+    ].filter(Boolean),
+    xper: [
+        findMatchingColumn(columns,['no of pouches','april+may']),
+        findMatchingColumn(columns,['balance'])
+    ].filter(Boolean),
+    fwk: []
+};
 
-const filterColumns=getFilterColumns(columns);
+if(containerId==='fwk'){
+    const placementCol = findMatchingColumn(columns,['placement']) || findMatchingColumn(columns,['placed']);
+    data = data.map(row=>{
+        const placementRaw = placementCol ? String(row[placementCol] ?? '').trim().toLowerCase() : '';
+        let placementFlag = 'No';
+        if(['yes','y','placed','done','1','true'].includes(placementRaw)){
+            placementFlag = 'Yes';
+        }
+        return {...row, 'Placement': placementFlag};
+    });
+}
+const finalColumns = Object.keys(data[0]);
+
+const filterColumns=getFilterColumns(finalColumns);
+if(containerId==='fwk' && !filterColumns.includes('Placement')){
+    filterColumns.push('Placement');
+}
+const subtotalColumns = subtotalColumnsConfig[containerId] || [];
 
 container.innerHTML = `
 
@@ -582,7 +622,7 @@ ${v}
 
 <!-- SUBTOTALS -->
 
-<div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
+<div class="grid grid-cols-1 md:grid-cols-5 gap-5 mb-8">
 
 <div class="bg-blue-50 rounded-2xl p-5 border border-blue-200">
 <div class="text-sm text-gray-500">Records</div>
@@ -591,12 +631,12 @@ ${data.length}
 </div>
 </div>
 
+${subtotalColumns.map((col,idx)=>`
 <div class="bg-green-50 rounded-2xl p-5 border border-green-200">
-<div class="text-sm text-gray-500">Numeric Total</div>
-<div class="text-3xl font-black text-green-700 subtotal-total">
-0
+<div class="text-sm text-gray-500">${col} Subtotal</div>
+<div class="text-3xl font-black text-green-700" data-subtotal-column="${col}" data-column-index="${finalColumns.indexOf(col)}">0</div>
 </div>
-</div>
+`).join('')}
 
 </div>
 
@@ -610,7 +650,7 @@ ${data.length}
 
 <tr>
 
-${columns.map(col=>`
+${finalColumns.map(col=>`
 <th class="p-3">
 ${col}
 </th>
@@ -626,7 +666,7 @@ ${data.map((row,index)=>`
 
 <tr class="${index % 2 === 0 ? '' : 'bg-gray-50'}">
 
-${columns.map(col=>`
+${finalColumns.map(col=>`
 
 <td class="p-2">
 
