@@ -207,6 +207,11 @@ tbody tr:hover{
     color:white;
 }
 
+.sortable{
+    cursor:pointer;
+    user-select:none;
+}
+
 </style>
 
 </head>
@@ -349,6 +354,7 @@ const summaryData3 = __SUMMARY3_DATA__;
 const pwgData = __PWG_DATA__;
 const xperData = __XPER_DATA__;
 const fwkData = __FWK_DATA__;
+const tableState = {};
 
 function showTab(tabId,event){
 
@@ -473,6 +479,39 @@ return keywords.every(k=>name.includes(k));
 });
 }
 
+function normalizeFilterValue(column, value){
+const colName=String(column || '').toLowerCase();
+const raw=String(value ?? '').trim();
+if(colName.includes('day') || colName.includes('drcp')){
+return raw.toUpperCase();
+}
+return raw;
+}
+
+function getSortedData(data, sectionId){
+const state = tableState[sectionId];
+if(!state || !state.column){
+return [...data];
+}
+
+const sortColumn = state.column;
+const direction = state.direction === 'asc' ? 1 : -1;
+
+return [...data].sort((a,b)=>{
+const aRaw = a[sortColumn];
+const bRaw = b[sortColumn];
+const aNum = parseFloat(String(aRaw ?? '').replace(/,/g,''));
+const bNum = parseFloat(String(bRaw ?? '').replace(/,/g,''));
+const bothNumeric = !isNaN(aNum) && !isNaN(bNum);
+if(bothNumeric){
+return (aNum - bNum) * direction;
+}
+const aVal = String(aRaw ?? '').toLowerCase();
+const bVal = String(bRaw ?? '').toLowerCase();
+return aVal.localeCompare(bVal) * direction;
+});
+}
+
 function readCellNumber(cellValue){
 const parsed = parseFloat(String(cellValue ?? '').replace(/,/g,'').trim());
 return isNaN(parsed) ? 0 : parsed;
@@ -569,8 +608,12 @@ if(containerId==='fwk'){
 const finalColumns = Object.keys(data[0]);
 
 const filterColumns=getFilterColumns(finalColumns);
+const isXper = containerId==='xper';
+const filteredColumns = isXper
+    ? filterColumns.filter(col=>!String(col).toLowerCase().includes('cluster'))
+    : filterColumns;
 if(containerId==='fwk' && !filterColumns.includes('Placement')){
-    filterColumns.push('Placement');
+    filteredColumns.push('Placement');
 }
 const subtotalColumns = subtotalColumnsConfig[containerId] || [];
 
@@ -594,7 +637,7 @@ ${data.length} Dealers
 
 <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
 
-${filterColumns.map(col=>`
+${filteredColumns.map(col=>`
 
 <select
 class="filter border border-gray-300 rounded-2xl p-3"
@@ -605,7 +648,7 @@ data-table="${containerId}">
 Filter ${col}
 </option>
 
-${[...new Set(data.map(r=>r[col]))]
+${[...new Set(data.map(r=>normalizeFilterValue(col,r[col])))]
 .filter(v=>v!=='')
 .map(v=>`
 <option value="${v}">
@@ -651,7 +694,7 @@ ${subtotalColumns.map((col,idx)=>`
 <tr>
 
 ${finalColumns.map(col=>`
-<th class="p-3">
+<th class="p-3 sortable" data-section="${containerId}" data-column="${col}">
 ${col}
 </th>
 `).join('')}
@@ -691,6 +734,7 @@ ${row[col] ?? ''}
 `;
 
 setupFilters(containerId,data);
+setupSorting(containerId,data);
 
 calculateSubtotals(containerId);
 
@@ -721,7 +765,7 @@ if(value!==''){
 
 filtered=filtered.filter(row=>
 
-String(row[column]).trim()===value
+normalizeFilterValue(column,row[column])===normalizeFilterValue(column,value)
 
 );
 
@@ -760,9 +804,10 @@ No Records Found
 return;
 }
 
-const columns=Object.keys(data[0]);
+const sortedData=getSortedData(data,sectionId);
+const columns=Object.keys(sortedData[0]);
 
-tbody.innerHTML=data.map((row,index)=>`
+tbody.innerHTML=sortedData.map((row,index)=>`
 
 <tr class="${index % 2 === 0 ? '' : 'bg-gray-50'}">
 
@@ -782,6 +827,32 @@ ${row[col] ?? ''}
 
 calculateSubtotals(sectionId);
 
+}
+
+function setupSorting(sectionId,originalData){
+const section=document.getElementById(sectionId);
+const headers=section.querySelectorAll('th.sortable');
+headers.forEach(header=>{
+header.addEventListener('click',()=>{
+const column=header.dataset.column;
+const current=tableState[sectionId];
+if(current && current.column===column){
+tableState[sectionId].direction=current.direction==='asc' ? 'desc' : 'asc';
+}else{
+tableState[sectionId]={column, direction:'asc'};
+}
+const filters=section.querySelectorAll('.filter');
+let filtered=[...originalData];
+filters.forEach(f=>{
+const value=f.value;
+const col=f.dataset.column;
+if(value!==''){
+filtered=filtered.filter(row=>normalizeFilterValue(col,row[col])===normalizeFilterValue(col,value));
+}
+});
+renderFiltered(sectionId,filtered);
+});
+});
 }
 
 // =======================================================
